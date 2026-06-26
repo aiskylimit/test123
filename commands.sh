@@ -1,3 +1,3 @@
-#1
+#2
 #download-and-sample
-bash scripts/setup_env.sh
+-0
