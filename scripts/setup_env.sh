@@ -30,6 +30,8 @@ conda init bash --quiet 2>/dev/null || true
 
 # 3. Accept conda terms (suppress future prompts)
 conda config --set auto_activate_base false
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main 2>/dev/null || true
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r 2>/dev/null || true
 
 # 4. Create embeddings_hub env
 if conda env list | grep -q "embeddings_hub"; then
