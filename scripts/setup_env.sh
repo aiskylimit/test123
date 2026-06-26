@@ -68,7 +68,11 @@ conda run -n fasttext_env pip install "$FASTTEXT_DIR"
 conda run -n fasttext_env pip install "numpy<2"
 rm -rf "$FASTTEXT_DIR"
 
+# 8. Verify
 echo ""
+echo "=== Verifying embeddings_hub ==="
+sleep 5
+conda activate embeddings_hub
+python -c "import torch; print('CUDA:', torch.cuda.is_available(), 'GPUs:', torch.cuda.device_count(), 'Version:', torch.version.cuda)"
+conda deactivate
 echo "=== Done ==="
-echo "Run: conda activate embeddings_hub"
-echo "Verify: python -c \"import torch; print(torch.cuda.is_available(), torch.cuda.device_count(), torch.version.cuda)\""
