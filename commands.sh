@@ -1,3 +1,9 @@
-#2 +a -f-/opt/dlami/nvme/smoke_test_outputs/S3_a02/checkpoint-6500/trainer_state.json,/opt/dlami/nvme/smoke_test_outputs/S3_a015/checkpoint-6500/trainer_state.json,/opt/dlami/nvme/smoke_test_outputs/S3_a015/checkpoint-2500/trainer_state.json,/opt/dlami/nvme/smoke_test_outputs/S3_a015/checkpoint-5000/trainer_state.json
-#check-wandb-size
- 
+#1
+#train-baseline
+eval "$($HOME/miniconda3/bin/conda shell.bash hook)"
+sleep 3
+conda activate embeddings_hub
+sleep 3
+export WANDB_MODE=offline
+export NCCL_NVLS_ENABLE=0
+bash scripts/train_qwen3_0.6b_baseline.sh
