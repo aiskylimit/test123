@@ -1,2 +1,3 @@
-#2 +a -f-/opt/dlami/nvme/smoke_test_outputs/baseline/checkpoint-1500/eval_ppl.json,/opt/dlami/nvme/smoke_test_outputs/baseline/checkpoint-3250/eval_ppl.json,/opt/dlami/nvme/smoke_test_outputs/baseline/checkpoint-5500/eval_ppl.json,/opt/dlami/nvme/smoke_test_outputs/baseline/checkpoint-6500/eval_ppl.json,/opt/dlami/nvme/smoke_test_outputs/baseline/checkpoint-1500/eval_benchmarks.json,/opt/dlami/nvme/smoke_test_outputs/baseline/checkpoint-3250/eval_benchmarks.json,/opt/dlami/nvme/smoke_test_outputs/baseline/checkpoint-5500/eval_benchmarks.json,/opt/dlami/nvme/smoke_test_outputs/baseline/checkpoint-6500/eval_benchmarks.json
+#1 +10+a
 #eval-results-baseline
+nvidia-smi
