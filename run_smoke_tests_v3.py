@@ -38,11 +38,11 @@ ARM_CONFIGS = {
     "V2c_tail_emb":  {"hub_type": "v2_topk", "placement": "embedding", "top_k": 10, "tail_mode": "tail"},
     "V2c_tail_mid10": {"hub_type": "v2_topk", "placement": "mid", "layer_idx": 10, "top_k": 10, "tail_mode": "tail"},
     # V6: stochastic replacement (embedding layer only)
-    "V6_1000":  {"hub_type": "v6", "placement": "embedding", "num_hub_embeddings": 1000, "top_k": 10},
-    "V6_128":   {"hub_type": "v6", "placement": "embedding", "num_hub_embeddings": 128,  "top_k": 10},
+    "V6_1000":  {"hub_type": "v6", "placement": "embedding", "num_hub_embeddings": 1000, "top_k": 10, "batch_size": 8, "grad_accum": 8},
+    "V6_128":   {"hub_type": "v6", "placement": "embedding", "num_hub_embeddings": 128,  "top_k": 10, "batch_size": 8, "grad_accum": 8},
     # V6f: factorized concept/residual (small codebook)
-    "V6f_128":  {"hub_type": "v6f", "placement": "embedding", "num_hub_embeddings": 128, "top_k": 10},
-    "V6f_64":   {"hub_type": "v6f", "placement": "embedding", "num_hub_embeddings": 64,  "top_k": 10},
+    "V6f_128":  {"hub_type": "v6f", "placement": "embedding", "num_hub_embeddings": 128, "top_k": 10, "batch_size": 8, "grad_accum": 8},
+    "V6f_64":   {"hub_type": "v6f", "placement": "embedding", "num_hub_embeddings": 64,  "top_k": 10, "batch_size": 8, "grad_accum": 8},
 }
 
 ALL_ARMS = list(ARM_CONFIGS.keys())
@@ -68,8 +68,8 @@ def build_cmd(arm_name, arm_cfg, output_dir, data_dir, save_token_ids=False):
         "--seed", "42",
         "--bf16",
         "--ddp_timeout", "21600",
-        "--per_device_train_batch_size", "16",
-        "--gradient_accumulation_steps", "4",
+        "--per_device_train_batch_size", str(arm_cfg.get("batch_size", 16)),
+        "--gradient_accumulation_steps", str(arm_cfg.get("grad_accum", 4)),
         "--num_train_epochs", "1",
         "--learning_rate", "3e-4",
         "--lr_scheduler_type", "cosine_with_min_lr",
