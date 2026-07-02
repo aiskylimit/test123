@@ -21,16 +21,16 @@ logger = logging.getLogger(__name__)
 
 ARM_CONFIGS = {
     # V5: V3 block at mid-layer (the doc's first-priority run)
-    "V5_mid10": {"hub_type": "v3", "placement": "mid", "layer_idx": 10, "num_heads": 1},
-    "V5_mid14": {"hub_type": "v3", "placement": "mid", "layer_idx": 14, "num_heads": 1},
-    "V5_mid6":  {"hub_type": "v3", "placement": "mid", "layer_idx": 6,  "num_heads": 1},
+    "V5_mid10": {"hub_type": "v3", "placement": "mid", "layer_idx": 10, "num_heads": 1, "num_hub_embeddings": 128},
+    "V5_mid14": {"hub_type": "v3", "placement": "mid", "layer_idx": 14, "num_heads": 1, "num_hub_embeddings": 128},
+    "V5_mid6":  {"hub_type": "v3", "placement": "mid", "layer_idx": 6,  "num_heads": 1, "num_hub_embeddings": 128},
     # V3: V3 block at embedding (doc's second-priority run)
-    "V3_emb":   {"hub_type": "v3", "placement": "embedding", "num_heads": 1},
+    "V3_emb":   {"hub_type": "v3", "placement": "embedding", "num_heads": 1, "num_hub_embeddings": 128},
     # V4: multi-head V3
     "V4_emb_h4":   {"hub_type": "v3", "placement": "embedding", "num_heads": 4},
     "V4_mid10_h4": {"hub_type": "v3", "placement": "mid", "layer_idx": 10, "num_heads": 4},
     # V2-concat
-    "V2_emb":    {"hub_type": "v2_concat", "placement": "embedding", "use_mlp": False},
+    "V2_emb":    {"hub_type": "v2_concat", "placement": "embedding", "use_mlp": False, "num_hub_embeddings": 128},
     "V2b_emb":   {"hub_type": "v2_concat", "placement": "embedding", "use_mlp": True},
     "V2_mid10":  {"hub_type": "v2_concat", "placement": "mid", "layer_idx": 10, "use_mlp": False},
     # V2c-topk
@@ -39,6 +39,7 @@ ARM_CONFIGS = {
     "V2c_tail_mid10": {"hub_type": "v2_topk", "placement": "mid", "layer_idx": 10, "top_k": 10, "tail_mode": "tail"},
     # V6: stochastic replacement (embedding layer only)
     "V6_1000":  {"hub_type": "v6", "placement": "embedding", "num_hub_embeddings": 1000, "top_k": 10},
+    "V6_128":   {"hub_type": "v6", "placement": "embedding", "num_hub_embeddings": 128,  "top_k": 10},
     # V6f: factorized concept/residual (small codebook)
     "V6f_128":  {"hub_type": "v6f", "placement": "embedding", "num_hub_embeddings": 128, "top_k": 10},
     "V6f_64":   {"hub_type": "v6f", "placement": "embedding", "num_hub_embeddings": 64,  "top_k": 10},

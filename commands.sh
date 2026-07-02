@@ -1,2 +1,10 @@
-#2 +a -f-/opt/dlami/nvme/smoke_test_outputs/baseline/probe2_single_step1500_RESULTS.md,/opt/dlami/nvme/smoke_test_outputs/baseline/probe2_single_step3250_RESULTS.md,/opt/dlami/nvme/smoke_test_outputs/baseline/probe2_single_step5500_RESULTS.md,/opt/dlami/nvme/smoke_test_outputs/baseline/probe2_single_step6500_RESULTS.md
-#probe-results-baseline-early
+#1 +20+a
+#accelerate-config
+mkdir -p ~/.cache/huggingface/accelerate
+sleep 2
+
+cp resources/accelerate_config.yaml ~/.cache/huggingface/accelerate/default_config.yaml
+sleep 2
+
+echo "=== Accelerate config copied ==="
+cat ~/.cache/huggingface/accelerate/default_config.yaml
