@@ -179,7 +179,7 @@ def save_embhub_v3(model: nn.Module, save_directory: str) -> None:
     os.makedirs(save_directory, exist_ok=True)
 
     hub = model.embhub
-    state_dict = {k: v.float() for k, v in hub.state_dict().items()}
+    state_dict = {k: v.float() if v.is_floating_point() else v for k, v in hub.state_dict().items()}
     torch.save(state_dict, os.path.join(save_directory, EMBHUB_V3_WEIGHTS_NAME))
 
     hub_type = getattr(model, "_embhub_hub_type", "v3")
