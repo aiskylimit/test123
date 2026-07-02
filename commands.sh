@@ -1,10 +1,12 @@
-#1 +20+a
-#accelerate-config
-mkdir -p ~/.cache/huggingface/accelerate
-sleep 2
+#1
+#train-v3-variants
+eval "$($HOME/miniconda3/bin/conda shell.bash hook)"
+sleep 3
+conda activate embeddings_hub
+sleep 3
+export WANDB_MODE=offline
 
-cp resources/accelerate_config.yaml ~/.cache/huggingface/accelerate/default_config.yaml
-sleep 2
+nvidia-smi
+sleep 3
 
-echo "=== Accelerate config copied ==="
-cat ~/.cache/huggingface/accelerate/default_config.yaml
+python run_smoke_tests_v3.py --arms V6f_128 V5_mid10 V3_emb V2_emb --save-token-ids --stop-at-step 6500
