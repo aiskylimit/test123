@@ -23,6 +23,8 @@ METRIC_KEYS = [
     "embhub/anchor_pairwise_cos", "embhub/norm_ratio",
     "embhub/gate_mean", "embhub/w_mix_norm", "embhub/w_anchor_norm",
     "embhub/topk_mass_total",
+    "embhub/concept_norm", "embhub/curriculum_ramp",
+    "embhub/resid_norm", "embhub/resid_concept_ratio",
 ]
 
 
@@ -71,6 +73,10 @@ class EmbHubV3SmokeCallback(TrainerCallback):
         from model_wrapper_v3 import _get_transformer_layers
         layers = _get_transformer_layers(self.model)
         target_layer = layers[layer_idx]
+        hub = self.model.embhub
+
+        hub_handle = self.model._embhub_hook_handle
+        hub_handle.remove()
 
         captured = {}
         def capture_hook(mod, inp, out):
@@ -82,6 +88,14 @@ class EmbHubV3SmokeCallback(TrainerCallback):
         handle = target_layer.register_forward_hook(capture_hook)
         self.model(probe)
         handle.remove()
+
+        def mid_layer_hook(mod, inp, out):
+            if isinstance(out, tuple):
+                modified = hub(out[0])
+                return (modified,) + out[1:]
+            return hub(out)
+        self.model._embhub_hook_handle = target_layer.register_forward_hook(mid_layer_hook)
+
         return captured["hidden"]
 
     def on_step_end(self, args, state, control, **kwargs):
@@ -110,6 +124,10 @@ class EmbHubV3SmokeCallback(TrainerCallback):
             "embhub/w_mix_norm": diag.get("w_mix_norm", ""),
             "embhub/w_anchor_norm": diag.get("w_anchor_norm", ""),
             "embhub/topk_mass_total": diag.get("topk_mass_total", ""),
+            "embhub/concept_norm": diag.get("concept_norm", ""),
+            "embhub/curriculum_ramp": diag.get("curriculum_ramp", ""),
+            "embhub/resid_norm": diag.get("resid_norm", ""),
+            "embhub/resid_concept_ratio": diag.get("resid_concept_ratio", ""),
         }
 
         if state.is_world_process_zero:
