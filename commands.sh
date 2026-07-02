@@ -2,7 +2,7 @@
 #kill-and-cleanup
 pkill -f "smoke_train_v3.py" || true
 pkill -f "accelerate" || true
-sleep 30
+sleep 30 
 
 # Remove all V3 output folders
 rm -rf /opt/dlami/nvme/smoke_test_outputs_v3/V6f_128
