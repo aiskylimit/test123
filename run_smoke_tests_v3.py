@@ -111,6 +111,60 @@ def build_cmd(arm_name, arm_cfg, output_dir, data_dir, save_token_ids=False):
     return cmd
 
 
+def ensure_gpus_free(max_attempts=10, sleep_between=30):
+    """Wait until all GPUs have 0 processes. Kill stragglers if needed."""
+
+    for attempt in range(max_attempts):
+        result = subprocess.run(
+            ["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            logger.warning(f"    nvidia-smi failed (code {result.returncode}): {result.stderr.strip()}")
+            time.sleep(sleep_between)
+            continue
+
+        pids = list(dict.fromkeys(p.strip() for p in result.stdout.strip().split("\n") if p.strip()))
+
+        if not pids:
+            logger.info(f"    GPUs are free (attempt {attempt + 1})")
+            return True
+
+        logger.info(f"    GPUs still in use ({len(pids)} processes: {pids}), attempt {attempt + 1}/{max_attempts}")
+
+        killed_groups = set()
+        for pid in pids:
+            try:
+                pid_int = int(pid)
+                pgid = os.getpgid(pid_int)
+                if pgid not in killed_groups:
+                    os.killpg(pgid, signal.SIGTERM)
+                    killed_groups.add(pgid)
+                    logger.info(f"    Sent SIGTERM to process group {pgid} (from pid {pid})")
+            except (ProcessLookupError, PermissionError, ValueError, OSError):
+                pass
+
+        time.sleep(5)
+
+        for pid in pids:
+            try:
+                pid_int = int(pid)
+                pgid = os.getpgid(pid_int)
+                os.killpg(pgid, signal.SIGKILL)
+                logger.info(f"    Sent SIGKILL to process group {pgid} (from pid {pid})")
+            except (ProcessLookupError, PermissionError, ValueError, OSError):
+                pass
+            try:
+                os.kill(int(pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, ValueError, OSError):
+                pass
+
+        time.sleep(max(0, sleep_between - 5))
+
+    logger.error("    Failed to free GPUs after all attempts!")
+    return False
+
+
 def wait_for_step(proc, smoke_csv_path, target_step, poll_interval=10):
     while proc.poll() is None:
         time.sleep(poll_interval)
@@ -127,9 +181,20 @@ def wait_for_step(proc, smoke_csv_path, target_step, poll_interval=10):
                     logger.info(f"    Sending SIGTERM...")
                     try:
                         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-                    except ProcessLookupError:
+                    except OSError:
                         pass
-                    proc.wait(timeout=60)
+                    try:
+                        proc.wait(timeout=60)
+                    except subprocess.TimeoutExpired:
+                        logger.warning(f"    Process did not exit after SIGTERM+60s, sending SIGKILL...")
+                        try:
+                            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                        except OSError:
+                            pass
+                        try:
+                            proc.wait(timeout=30)
+                        except subprocess.TimeoutExpired:
+                            logger.error(f"    Process {proc.pid} stuck after SIGKILL, giving up (ensure_gpus_free will handle)")
                     return last_step
         except (ValueError, OSError):
             continue
@@ -168,6 +233,12 @@ def main():
         cmd = build_cmd(arm_name, arm_cfg, output_dir, args.data_dir,
                         save_token_ids=args.save_token_ids)
 
+        logger.info(f"  Ensuring GPUs are free before {arm_name}...")
+        if not ensure_gpus_free():
+            logger.error(f"  SKIP {arm_name}: could not free GPUs")
+            completed.append({"arm": arm_name, "config": arm_cfg, "status": "SKIPPED (GPUs busy)", "elapsed": 0})
+            continue
+
         logger.info(f"  START: {arm_name} ({arm_cfg})")
         arm_start = time.time()
 
@@ -198,8 +269,8 @@ def main():
         completed.append({"arm": arm_name, "config": arm_cfg, "status": status, "elapsed": arm_elapsed})
 
         if arm_name != args.arms[-1]:
-            logger.info(f"    Sleeping 30s before next arm...")
-            time.sleep(30)
+            logger.info(f"    Waiting 10s for GPU processes to wind down...")
+            time.sleep(10)
 
     total_elapsed = time.time() - start_time
     logger.info(f"\nAll {len(completed)} arms done in {total_elapsed:.0f}s")
