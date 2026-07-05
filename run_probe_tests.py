@@ -91,7 +91,8 @@ def run_tests_for_checkpoint(gpu_id, ckpt_path, arm_name, step,
     print(t5_format(per_layer))
 
     # --- T2: language decodability (hub only — needs anchor weights) ---
-    if has_hub:
+    has_anchors = has_hub and hub_info["hub_type"] != "linear_ablation"
+    if has_anchors:
         print(f"{label}: T2 decodability...")
         from diagnostics.test_t2_lang_decodability import (
             run_decodability, format_results as t2_format,
@@ -108,7 +109,7 @@ def run_tests_for_checkpoint(gpu_id, ckpt_path, arm_name, step,
         print(t2_format(t2_result))
 
     # --- T4: contribution share (hub only — needs hub internals) ---
-    if has_hub:
+    if has_anchors:
         print(f"{label}: T4 contribution share...")
         from diagnostics.test_t4_contribution_share import (
             run_contribution_share, format_results as t4_format,

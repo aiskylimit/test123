@@ -38,6 +38,7 @@ from hub_layer_v3 import EmbHubV3
 from hub_layer_v2_concat import EmbHubV2Concat
 from hub_layer_v2_topk import EmbHubV2TopK
 from hub_layer_v6 import EmbHubV6
+from hub_layer_linear_ablation import EmbHubLinearAblation
 
 EMBHUB_V3_WEIGHTS_NAME = "embhub_v3.pt"
 EMBHUB_V3_CONFIG_NAME = "embhub_v3_config.json"
@@ -129,8 +130,10 @@ def inject_embhub_v3(
             anneal_steps=anneal_steps,
             reference_weight=reference_weight,
         )
+    elif hub_type == "linear_ablation":
+        hub = EmbHubLinearAblation(embedding_dim=embedding_dim)
     else:
-        raise ValueError(f"hub_type must be 'v3', 'v2_concat', 'v2_topk', 'v6', or 'v6f', got '{hub_type}'")
+        raise ValueError(f"hub_type must be 'v3', 'v2_concat', 'v2_topk', 'v6', 'v6f', or 'linear_ablation', got '{hub_type}'")
     hub.to(device=next(model.parameters()).device, dtype=next(model.parameters()).dtype)
 
     model.embhub = hub

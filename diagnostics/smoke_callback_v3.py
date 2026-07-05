@@ -113,13 +113,13 @@ class EmbHubV3SmokeCallback(TrainerCallback):
             diag = hub.compute_diagnostics(diag_input)
 
         metrics = {
-            "embhub/entropy": diag["entropy_mean"],
-            "embhub/logit_std": diag["logit_std"],
-            "embhub/logit_scale": diag["logit_scale"],
-            "embhub/top10_anchor_mass": diag["top10_anchor_mass"],
-            "embhub/dead_anchor_frac": diag["dead_anchor_fraction"],
-            "embhub/anchor_pairwise_cos": diag["anchor_pairwise_cosine"],
-            "embhub/norm_ratio": diag["norm_ratio"],
+            "embhub/entropy": diag.get("entropy_mean", ""),
+            "embhub/logit_std": diag.get("logit_std", ""),
+            "embhub/logit_scale": diag.get("logit_scale", ""),
+            "embhub/top10_anchor_mass": diag.get("top10_anchor_mass", ""),
+            "embhub/dead_anchor_frac": diag.get("dead_anchor_fraction", ""),
+            "embhub/anchor_pairwise_cos": diag.get("anchor_pairwise_cosine", ""),
+            "embhub/norm_ratio": diag.get("norm_ratio", ""),
             "embhub/gate_mean": diag.get("gate_mean", ""),
             "embhub/w_mix_norm": diag.get("w_mix_norm", ""),
             "embhub/w_anchor_norm": diag.get("w_anchor_norm", ""),
@@ -144,11 +144,14 @@ class EmbHubV3SmokeCallback(TrainerCallback):
                 extra += f" gate={diag['gate_mean']:.4f}"
             if "w_mix_norm" in diag:
                 extra += f" w_mix={diag['w_mix_norm']:.4f}"
+            if "weight_drift" in diag:
+                extra += f" drift={diag['weight_drift']:.4f}"
+            entropy_str = f"entropy={diag['entropy_mean']:.3f} " if "entropy_mean" in diag else ""
+            scale_str = f"scale={diag['logit_scale']:.2f} " if "logit_scale" in diag else ""
+            dead_str = f"dead={diag['dead_anchor_fraction']:.2%} " if "dead_anchor_fraction" in diag else ""
             print(f"  [EmbHub-{hub_type} step {state.global_step} @{placement}] "
-                  f"entropy={diag['entropy_mean']:.3f} "
-                  f"scale={diag['logit_scale']:.2f} "
-                  f"dead={diag['dead_anchor_fraction']:.2%} "
-                  f"norm_ratio={diag['norm_ratio']:.4f}"
+                  f"{entropy_str}{scale_str}{dead_str}"
+                  f"norm_ratio={diag.get('norm_ratio', 0):.4f}"
                   f"{extra}")
 
         if args.report_to and "wandb" in args.report_to:

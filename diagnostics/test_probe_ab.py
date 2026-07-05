@@ -163,8 +163,9 @@ def run_probe_ab(model, hub_info, tokenizer, translations, device,
     n_tuples = len(translations)
     result = {}
 
-    # ---- Probe A: anchor weight overlap (hub only) ----
-    if has_hub:
+    # ---- Probe A: anchor weight overlap (hub with anchors only) ----
+    has_anchors = has_hub and hub_type not in (None, "linear_ablation")
+    if has_anchors:
         trans_js = []
         per_pair_a = {}
 

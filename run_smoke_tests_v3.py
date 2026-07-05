@@ -43,6 +43,8 @@ ARM_CONFIGS = {
     # V6f: factorized concept/residual (small codebook)
     "V6f_128":  {"hub_type": "v6f", "placement": "embedding", "num_hub_embeddings": 128, "top_k": 10, "batch_size": 8, "grad_accum": 8},
     "V6f_64":   {"hub_type": "v6f", "placement": "embedding", "num_hub_embeddings": 64,  "top_k": 10, "batch_size": 8, "grad_accum": 8},
+    # Linear ablation: no anchors, just a learned d->d linear (control for V2c_tail)
+    "linear_ablation": {"hub_type": "linear_ablation", "placement": "embedding", "num_hub_embeddings": 0},
 }
 
 ALL_ARMS = list(ARM_CONFIGS.keys())

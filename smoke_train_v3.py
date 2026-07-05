@@ -285,18 +285,19 @@ def main():
             layer_idx=embhub_args.layer_idx,
             freeze_base=embhub_args.freeze_base,
         )
-        with torch.no_grad():
-            hub.log_logit_scale.fill_(math.log(embhub_args.scale_init))
+        if hasattr(hub, 'log_logit_scale'):
+            with torch.no_grad():
+                hub.log_logit_scale.fill_(math.log(embhub_args.scale_init))
 
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Total params: {total_params:,}, Trainable: {trainable_params:,} "
                 f"({100 * trainable_params / total_params:.2f}%)")
     if hub is not None:
+        scale_str = f"scale={hub.log_logit_scale.exp().item():.1f}" if hasattr(hub, 'log_logit_scale') else "scale=N/A"
         logger.info(f"Hub: type={embhub_args.hub_type}, placement={embhub_args.placement}, "
                      f"layer_idx={embhub_args.layer_idx}, num_embeddings={embhub_args.num_hub_embeddings}, "
-                     f"scale={hub.log_logit_scale.exp().item():.1f}, "
-                     f"scale_lr_mult={embhub_args.scale_lr_mult}")
+                     f"{scale_str}, scale_lr_mult={embhub_args.scale_lr_mult}")
 
     # Load data (shard-aware)
     datasets_list = []
