@@ -1,7 +1,8 @@
 """Probe 2 with MUSE-based translation pairs — loanword-filtered version.
 
-Same as anchor_probe2_muse.py but filters out tuples where any non-English
-translation is identical to the English word (e.g. love→love in vi/de).
+Same as anchor_probe2_muse.py but with per-pair loanword filtering: removes
+only the specific language entries where translation == English word (e.g.
+removes de="in" from the "in" tuple) while keeping all other valid pairs.
 
 Usage:
   python diagnostics/anchor_probe2_muse_no_loan_word.py \
@@ -91,13 +92,13 @@ def topk_jaccard(w1, w2, k=10):
     return len(s1 & s2) / len(s1 | s2) if len(s1 | s2) > 0 else 0
 
 
-def is_loanword(en_word, lang_words):
-    """True if any non-English translation is identical to the English word."""
-    return any(w.lower() == en_word.lower() for w in lang_words.values())
-
-
 def build_translation_tuples(trans_data):
-    """Build (en, {lang: word}) tuples, filtering out loanwords."""
+    """Build {en, lang: word} tuples with per-pair loanword filtering.
+
+    Removes only the specific language entries where translation == English word
+    (case-insensitive), keeping all other valid pairs from the same tuple.
+    Tuples with no remaining non-English entries are dropped.
+    """
     raw = []
     all_five = trans_data.get("all_five_tuples", {})
     for en_word, lang_words in all_five.items():
@@ -112,8 +113,24 @@ def build_translation_tuples(trans_data):
             entry.update(lang_words)
             raw.append(entry)
 
-    tuples = [t for t in raw if not is_loanword(t["en"], {k: v for k, v in t.items() if k != "en"})]
-    print(f"  Raw tuples: {len(raw)}, after loanword filter: {len(tuples)} ({len(raw) - len(tuples)} removed)")
+    tuples = []
+    n_pairs_removed = 0
+    for t in raw:
+        en_word = t["en"]
+        clean = {"en": en_word}
+        for lang, word in t.items():
+            if lang == "en":
+                continue
+            if word.lower() != en_word.lower():
+                clean[lang] = word
+            else:
+                n_pairs_removed += 1
+        if len(clean) > 1:
+            tuples.append(clean)
+
+    n_tuples_dropped = len(raw) - len(tuples)
+    print(f"  Raw tuples: {len(raw)}, after per-pair loanword filter: {len(tuples)} "
+          f"({n_pairs_removed} pairs removed, {n_tuples_dropped} tuples dropped entirely)")
     return tuples
 
 

@@ -1,16 +1,43 @@
-# Current Task — last updated 2026-07-01
+# Current Task — last updated 2026-07-03
 
 > The in-progress / foreground work. Read `PROJECT_NOTES.md` first for background, then this for "where exactly are we." When a task finishes, distill its conclusion into the PROJECT_NOTES timeline and clear this file for the next task.
 
 ## Goal
 
-Test whether stronger hub coupling (higher training alpha) improves cross-lingual alignment. Also test whether the effect changes with longer training (full 30K steps).
+Test new EmbHub architecture variants that address the redundancy problem identified in the V2 additive experiments. Full spec in `docs/embhub_next_directions.md`.
 
 ## Status — where we are RIGHT NOW
 
-**Alpha variant experiments completed through full 30K-step training.** S3_a015 (α=0.15) and S3_a02 (α=0.20) trained to 6500 steps, then S3_a02 and baseline extended to full 30K steps. Results: hub consistently ~0.005 below baseline — longer training does not help. Thinking about what to try next.
+**New architecture variants (V3+) implemented and training on 8x H200.** V2 additive is a clean negative (baseline beats hub). Now testing fundamentally different architectures: V3 (gate+add), V5 (mid-layer), V6f (factorized stochastic), V2 (concat), V2c (top-k).
 
-## What was completed (previous task, 2026-06-20 → 2026-06-26)
+### Already trained (128 anchors, 6500 steps, 8x H200):
+- **V6f_128** — V6 factorized with norm-capped residual, 128-anchor codebook
+- **V5_mid10** — V3 gate+add block at mid-layer (layer 10 of 28)
+- **V3_emb** — V3 gate+add block at embedding layer
+- **V2_emb** — V2 concat+linear at embedding layer
+
+### Currently training:
+- **V2c_tail_emb** — V2c top-k (k=10) with tail slot at embedding layer
+
+### Not yet trained:
+- Remaining arms configured in `run_smoke_tests_v3.py` (V4 multi-head, V2b MLP, V6 non-factorized, etc.)
+
+### Next steps:
+- Pull results from trained arms and run Probe 2 on all new variant checkpoints
+- Compare new variants against baseline
+
+### New code (V3+ architecture):
+- `hub_layer_v3.py` — V3/V4/V5 gate+add with decoupled keys/values, sigmoid gate, multi-head support
+- `hub_layer_v2_concat.py` — V2/V2b concat+linear (V2b adds GELU MLP)
+- `hub_layer_v2_topk.py` — V2c/V2c+tail/V2c+buckets with hard top-k routing
+- `hub_layer_v6.py` — V6/V6f stochastic replacement with curriculum
+- `model_wrapper_v3.py` — unified inject/save/load for all variants
+- `smoke_train_v3.py` — training script for all V3+ variants
+- `run_smoke_tests_v3.py` — smoke test runner with per-arm configs
+- `diagnostics/smoke_callback_v3.py` — diagnostics supporting mid-layer placement
+- V3+ checkpoints: `/opt/dlami/nvme/smoke_test_outputs_v3/{V6f_128,V5_mid10,V3_emb,V2_emb,...}`
+
+## What was completed (V2 additive experiments, 2026-06-20 → 2026-07-01)
 
 The per-step Probe 2 pipeline was rebuilt from scratch and extended significantly. Full results in `docs/EXPERIMENT_RESULTS.md`.
 
@@ -148,8 +175,8 @@ Ran `eval_parallel.py` on baseline, S3_a015, S3_a02 at steps 1500/3250/5500/6500
 
 **Benchmarks at step 6500** — no meaningful differences. Most tasks near chance (XNLI ~0.33, Belebele ~0.25, HellaSwag ~0.27, PAWS ~0.50). Model is too small (0.6B) and undertrained (6500 steps) for benchmarks to distinguish the three arms. Full results in `eval_ppl.json` and `eval_benchmarks.json` per checkpoint.
 
-### Not yet trained:
-- S3_a025 (α=0.25), S3_a03 (α=0.30), S3_a05 (α=0.50), S3_a10 (α=1.0) — configured in `run_smoke_tests.py` but not run yet
+### Not yet trained (old V2 additive, deprioritized):
+- S3_a025 (α=0.25), S3_a03 (α=0.30), S3_a05 (α=0.50), S3_a10 (α=1.0) — configured in `run_smoke_tests.py` but superseded by V3+ experiments
 
 ## Decisions already made (don't re-litigate)
 

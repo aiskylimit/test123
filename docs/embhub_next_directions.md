@@ -86,6 +86,22 @@ Shared elements across ALL variants (V2-V5):
   more similar than the no-hub baseline does?). Test A (anchor overlap) is secondary. The
   existing embedding-additive result (baseline +0.0504 >= hub +0.046) is the number to beat.
 
+ANCHOR COUNT — N = 128 FOR ALL NEW VARIANTS (not just V6f):
+- N=1000 is empirically oversized: Probe 1 showed ~45% globally dead, ~550 effectively used —
+  and a large N is what makes language partition AFFORDABLE in any variant. Small N applies the
+  interference pressure everywhere; in V2-V5 (optional anchors) it costs nothing and prevents
+  partition if the anchors are used; in V6/V6f it is a core mechanism.
+- Default N = 128 (with k = 10, ~8% of the codebook per token — still sparse). Fallbacks are
+  DIRECTIONAL: partition persists at 128 -> drop to 64 (but 64 makes k=10 select 16% of the
+  codebook and inflates random-pair chance overlap, weakening Test B discrimination — use only
+  if needed); concept-only PPL catastrophic at 128 (bottleneck too tight) -> raise to 256 (but
+  256 lets 6 languages carve ~40 private anchors each — partition becomes affordable again).
+- RECALIBRATE N-dependent diagnostics: max entropy = log(N) = 4.85 at N=128 (vs 6.91 at 1000),
+  so the old "sharp selection ~ entropy < 4" rule of thumb is WRONG at N=128 (4 is near-uniform
+  there) — read entropy relative to log(N). Top-k mass, dead-frac, and Jaccard baselines also
+  shift with N. And at small N the frequency-matched RANDOM-pair control in Test B is
+  load-bearing (chance overlap is higher), not a formality.
+
 LEARNING RATE — CRITICAL (do not get this wrong):
 - The 75x LR multiplier applies ONLY to the temperature parameter `log_logit_scale`. It exists
   because that single scalar has a tiny gradient and would otherwise stay frozen.
@@ -152,7 +168,8 @@ step-0 pass-through check, then loss-vs-baseline through ~1000 steps.)
 #### V2 sub-variants (small changes to the combine step — cheap to try alongside V2)
 
 **V2b — transform the mixture with an MLP before concat.**
-`output = Linear_out([x ; GELU(Linear_v(mixture))])`. NOTE: putting a PLAIN linear on the
+`output = Linear_out([x ; GELU(Linear_v(mixture))])`, with `Linear_v: d -> d` (so the concat
+stays 2d and `Linear_out: 2d -> d` exactly as in V2). NOTE: putting a PLAIN linear on the
 mixture before the concat adds nothing — two stacked linears with nothing between them collapse
 into one, and the outer `Linear_out` can already represent any linear transform of the mixture.
 It only becomes more expressive with a NONLINEARITY between them (the GELU above), i.e. the
@@ -192,6 +209,11 @@ Weighting each concatenated anchor (which scalar to multiply by) — three optio
   on its own (it can only learn fixed per-slot weights). Reasonable as a baseline to check
   whether weighting matters at all.
 Prefer Option B first; A is the rescue if B's scale is too weak; C is the no-weighting baseline.
+(NOT a contradiction with V6/V6f and the anchors-only pattern modes using RENORMALIZED weights:
+different jobs. V2c's weighted slots sit ALONGSIDE x, so preserving absolute selection
+confidence — Option B — adds information. A STANDALONE mixture must carry full magnitude on its
+own, so it needs renormalization. Rule of thumb: raw weights when the mixture accompanies x;
+renormalized when the mixture must stand alone.)
 
 Caveats: (i) top-k is a HARD selection, so gradient flows only to the k chosen anchors per token
 (like MoE hard routing) — reintroduces some dead-anchor risk that full softmax avoids (the
@@ -395,7 +417,8 @@ overall LM quality. (Same trick family as BERT's 80/10/10 masking or modality dr
 inference, use the combined form; comparing inference modes is itself informative.
 
 ```python
-# V6-mix forward (training; N can stay 1000 here — scarcity is V6f's addition)
+# V6-mix forward (training; use the N=128 default like all variants. V6-mix supplies NECESSITY;
+# V6f ADDS scarcity's second role + the capped residual. Large N here would re-allow partition.)
 # tok_emb: (B, T, d)
 w = softmax(cos(tok_emb, anchor_keys) * log_scale.exp().clamp(max=100))  # (B, T, N)
 topw, topi = w.topk(k)                               # k ~= 10
@@ -437,9 +460,11 @@ somewhat slower per step than in always-on variants; that is normal, not a bug.
 What V6 does and does NOT fix:
 - It fixes IGNORABILITY (the anchors become load-bearing — the limitation V2-V5 MAY inherit
   from the tested additive design).
-- It does NOT by itself fix PARTITIONING: with N=1000 there is still room for each language to
-  claim its own private anchor set (Probe 1's observed failure), just now a load-bearing
-  private set. The anchors would carry real content but possibly per-language content.
+- It does NOT by itself fix PARTITIONING at LARGE N: necessity forces the anchors to be used,
+  but if N were large each language could still claim its own private (now load-bearing) set —
+  real content, but per-language. Two things address this: the N=128 default (shared elements)
+  removes most of the room to partition, and V6f adds the capped residual so legitimate
+  per-language content has a home while the scarce concept pool is pushed to share.
 That second gap is exactly what V6f adds.
 
 VERDICT and MONITORING for V6 (same three dials as V6f). Dials 1-2 are evaluated in the
@@ -450,8 +475,116 @@ not actually load-bearing. (Init note: `anchor_keys`/`anchor_values` init at emb
 std ~0.02, like the rest — the mixture must live at the embedding's magnitude since it adds to
 and sometimes replaces it.) Because V6 uses HARD
 top-k routing, the V2c routing caveat applies: watch `dead_anchor_frac` over the first ~1000+
-steps (rich-get-richer anchor death; with N=1000 and load-bearing anchors this is a real risk —
-if severe, reduce N, which also moves you toward V6f, or add a V2c-style aggregated tail).
+steps (rich-get-richer anchor death; with load-bearing anchors this is a real risk — at the
+N=128 default it is milder than at large N, but if severe, reduce N further or add a V2c-style
+aggregated tail).
+
+THE V6 PATTERN ON V2-V5: EVERY variant can carry the pattern. The split is WHICH FORM:
+- FULL pattern (token-only + anchor-only + mix): V2, V2b, V3, V4 — and V5 with a known cost.
+- LITE pattern (token-only + mix, no anchors-only): available to ALL variants; the ONLY form
+  V2c can carry (no faithful anchors-only mode exists for it — see recipes).
+Analysis: coherent for V2-V4 via one fix, but every coherent full hybrid CONVERGES TO V6 — so
+for a NECESSITY experiment, run V6 pure; the hybrids are post-signal ablations.
+- The fix that makes it coherent (for V2/V2b/V3/V4): anchors-only mode bypasses the variant's
+  COMBINE step ONLY (V2's `Linear([x;.])`, V3's gate) — content TRANSFORMS (V2b's MLP, V3's
+  `Linear_v`) are kept and applied identically in BOTH modes, so the mixture is ONE object
+  everywhere. This works because the anchors-only constraint ("be a full standalone
+  representation") is the STRONGEST constraint and subsumes the combiner-input role.
+- But trace the training dynamics: once anchors-only pins the mixture to standalone
+  embedding-space semantics, the combiner in the mix mode either (a) learns ~pass-through
+  (rediscovering plain add with extra parameters) or (b) learns to SUPPRESS the mixture — an
+  escape hatch that shrinks necessity from 50% of tokens (V6's forced full-strength add) to
+  only the 10% anchors-only slice. So V2/V3/V4 + pattern = V6 with extra parameters and
+  WEAKER necessity. The pure plain-add V6 is the strongest form of the pattern.
+- V5 + pattern: coherent in mechanism (retrieval at layer L is contextual, so anchors WOULD be
+  trained to imitate hidden states — same learning loop as at the embedding), but with a
+  fundamentally worse target. At the embedding the mixture must only reproduce TOKEN IDENTITY
+  (~17 bits, fully learnable -> replacement damage trains to ~zero). At layer L it must
+  reproduce the ACCUMULATED PREFIX CONTEXT (arbitrary specifics — names, numbers, references —
+  that a k-sparse mixture over a fixed codebook cannot carry) -> a PERMANENT damage floor on
+  every replaced position, and the anchors' job shifts from "cross-lingual token concepts" to
+  "coarse context summarizers". This is effectively a VQ-style mid-network bottleneck — a
+  legitimate but DIFFERENT (and costlier) experiment that would also confound V5's placement
+  bet with V6's necessity bet. Keep out of the first pass.
+- Post-signal upgrades to V6 (only after V6/V6f shows signal): a MODE-CONSISTENT transform
+  (`mixture' = Linear_v(mixture)` applied identically in EVERY mode, ordinary init — the
+  curriculum handles early safety), and/or V3-style extras on the mix mode, understood as
+  ablations of "does expressiveness help a working necessity mechanism?".
+MODE IMPLEMENTATION per variant (if a hybrid is ever built — exact recipes):
+- Token-only mode = BYPASS THE BLOCK ENTIRELY: output the raw `x` (embedding, or hidden state
+  for V5) as if the hub did not exist. TRAP: for V2, do NOT implement token-only as
+  `Linear([x ; 0])` — that equals `x` only at init (`[I|0]`) and silently diverges from the
+  plain path as `W_x` trains away from identity. Token-only must be the true baseline path.
+  (For V3/V4 this is natural — the block is residual, so token-only = skip the `gate*update`
+  branch; for V2 the bypass must be explicit because the block is not residual.)
+- Anchor-only mode = the RAW retrieved mixture, bypassing every combiner.
+  WARNING (applies to V2/V2b/V3/V4): do NOT use the FULL-softmax mixture in anchor-only mode.
+  Near-uniform softmax (early training / early curriculum) makes `softmax @ anchors` ~= the
+  MEAN of all anchors — the SAME vector for every replaced token: the V1 born-dead failure
+  reproduced inside a mode. Fix: any full-pattern hybrid should switch its selection to TOP-K
+  RENORMALIZED throughout (BOTH modes, one mixture object — mode-consistent), which keeps
+  mixtures token-differentiated even when weights are soft (the top-k SET differs per token).
+  This is how V6 does it, and yes — it moves the hybrid even closer to V6.
+  V2: top-k renormalized `w~ @ anchors` (keys = values = anchors; with the switch above).
+  V2b: do NOT bypass the MLP — that would make the mixture a different object per mode. Use the
+  MODE-CONSISTENT form: compute `mixture' = GELU(Linear_v(w~ @ anchors))` ONCE and use it in
+  BOTH modes (anchor-only = `mixture'`; mix = `Linear_out([x ; mixture'])`). `Linear_v` gets
+  ORDINARY init (the curriculum protects the anchor-only mode); `Linear_out` keeps its `[I|0]`
+  safe init (protects the mix mode).
+  V2c family: NO FAITHFUL anchors-only mode exists. Collapsing to a weighted sum abandons the
+  slot structure that defines V2c (you would be running V2's mode, not V2c's); feeding the
+  slots through the combiner with a zeroed x-block is the V2 trap; and a separate slots-only
+  projection reintroduces mode inconsistency. V2c can only carry PATTERN-LITE (see below).
+  V3/V4: MODE-CONSISTENT form (same doctrine as V2b): compute the shared object
+  `update = Linear_v(w~ @ anchor_values)` once; anchor-only = `update`; mix = `x + gate*update`.
+  Only the GATE (the combine step) is bypassed in anchor-only. Init split for the hybrid:
+  `Linear_v` switches to ORDINARY init (the curriculum protects anchor-only — a zero-init
+  `Linear_v` would emit ~zero standalone representations for thousands of steps); the gate
+  KEEPS its bias ~ -5 safe init (protects the mix mode).
+  V5: the V3-block's shared object (`Linear_v(w~ @ anchor_values)`, per the V3/V4 recipe)
+  replaces the layer-L hidden state (the costly case analyzed above).
+- Mix mode = the variant's normal forward — with ONE change in full-pattern hybrids: the
+  selection is the switched TOP-K RENORMALIZED version in this mode too (both modes share one
+  mixture object; "unchanged" refers to the combine step, not the selection).
+- All hybrids need the V6 CURRICULUM on the mode probabilities (full: 100/0/0 -> 50/40/10;
+  lite: 100/0 -> 50/50) regardless
+  of the variant's safe init — safe init protects the MIX mode's combiner; the curriculum
+  protects the ANCHOR-ONLY mode (anchors are random noise at step 0 in every variant).
+
+Summary table (modes per variant; "raw x" always means bypass the block entirely):
+
+| variant | pattern forms available | token-only | anchor-only | mix |
+|---|---|---|---|---|
+| V2 | FULL or LITE | raw x (NOT `Linear([x;0])`) | top-k renorm `w~ @ anchors` | normal forward |
+| V2b | FULL or LITE | raw x | `GELU(Linear_v(w~ @ anchors))` — MLP in BOTH modes | normal forward |
+| V2c    | LITE only | raw x | — (no faithful mode) | normal forward |
+| V3/V4  | FULL or LITE | x (skip the `gate*update` branch) | `Linear_v(w~ @ anchor_values)` — transform in BOTH modes, gate bypassed | normal forward |
+| V5     | LITE recommended; FULL possible but costly | h (hidden state, untouched) | replace h with `Linear_v(w~ @ values)` (permanent damage floor — see analysis) | normal forward |
+| V6/V6f | FULL (native) | tok_emb | mixture / concept (native) | plain add / concept+resid |
+
+TWO PATTERN OPTIONS any V2-V5 hybrid could use (recorded as available versions):
+- FULL pattern ("Vx+pattern"): token-only + anchor-only + mix. Available to V2/V2b/V3/V4
+  (via the raw-mixture fix + top-k renorm switch) and to V5 (possible, but with the permanent
+  damage floor — a VQ-style bottleneck, a different and costlier experiment). NOT available to
+  V2c (no faithful anchors-only mode). The analysis above applies: full hybrids converge to V6.
+- REDUCED pattern ("Vx+pattern-lite"): token-only + mix, NO anchors-only mode. Available to
+  EVERY variant (V2, V2b, V2c, V3, V4, V5) and SAFE everywhere — including V5, since the hidden
+  state is never replaced (no context loss, no damage floor). For V2c it is the ONLY form. BUT be honest about what it is: without the anchors-only mode it has NO
+  necessity mechanism. Randomly dropping the hub branch is BRANCH DROPOUT / stochastic depth —
+  it trains the model to function WITHOUT the hub (robustness to the branch's absence), which
+  is the OPPOSITE of forcing reliance on it. The anchors-only mode IS the teeth of the V6
+  pattern; remove it and the pattern becomes a mild regularizer, not a necessity device. So
+  pattern-lite resolves the V5 safety concern at the price of the pattern's entire point.
+  Recorded as an option; NOT expected to change any variant's cross-lingual outcome.
+  V2c+pattern-lite recipe (the one variant restricted to lite): token-only = raw `x`, bypassing
+  the block entirely (the V2 bypass trap applies — never `Linear([x ; 0...])`); mix = V2c's
+  normal forward `Linear([x ; w1*a_i1 ; ... ; wk*a_ik])`; no anchors-only mode. Curriculum on
+  the mix probability (100/0 -> 50/50 over the first few thousand steps). Same caveat as all
+  pattern-lite: this is branch dropout, not a necessity mechanism.
+
+Strategic rule: keep first-pass variants PURE — V5 and V6f test two competing hypotheses, and a
+chimera changes everything at once, making any result unattributable. Hybridize only after
+something wins.
 
 ### Variant V6f — V6 + scarcity + capped residual (factorized concept/residual)  [co-lead with V5]
 
@@ -545,99 +678,208 @@ Measuring only input-embedding Test B for a MID-layer block (V5) would MISS its 
 Test A (anchor overlap) as a secondary signal; the verdict is anchor-layer Test B vs the
 matched no-hub baseline.
 
-### ADDITIONAL TESTS (beyond Test B) — cheap, and each answers a question Test B cannot
+### ADDITIONAL TESTS (beyond Test B)
 
-Test B measures GEOMETRY (are translation pairs' representations closer?). These add TRANSFER,
-CAUSATION, and DIAGNOSIS. All are forward-pass-only or linear-probe cheap — no training runs.
+Test B only asks "are translation pairs geometrically close?". These add the questions it cannot
+answer — does a task transfer, does the model treat translations as interchangeable, does the
+model's OUTPUT behave cross-lingually. All are forward-pass or linear-probe cheap (no training).
 
-**T1. Cross-lingual transfer probe (ALL variants; hub vs baseline) — measures the actual claim.**
-IDEA: the project's claim is TRANSFER (learn a task in English, gain in other languages), and
-Test B is only its geometric proxy. Measure transfer directly with a linear probe.
-WHAT LAYER / HOW TO COMPARE WITH BASELINE: probe the SAME LAYER DEPTH in both models. The
-baseline has no hub, but it has a hidden state at every depth — so for an embedding-layer hub
-(V2-V4, V6, V6f), probe the EMBEDDING OUTPUT of each model (post-hub output for the hub model —
-for V6/V6f this means the INFERENCE-mode representation, `tok_emb + mixture` / `concept + resid`,
-not a stochastic training mode; plain embedding output for the baseline); for V5 (block at layer L), probe the LAYER-L OUTPUT of
-both models. Same depth = fair comparison; the hub is simply part of the hub-model's computation
-up to that depth. ALSO probe one or two DEEPER layers (e.g. mid and last): the hub's effect may
-compound downstream, and anchor-layer-only probing would miss that. Same forward pass, one extra
-linear head per layer — nearly free.
-IMPLEMENTATION: freeze both models. Representation = mean-pool the layer's hidden states over
-the sentence's tokens. For XNLI (sentence-pair task), use the standard pair features
-[u; v; |u-v|; u*v] and train a linear softmax (logistic regression) on English train data
-(a 20-50k subset is enough for a linear head), early-stop on English dev. Evaluate ZERO-SHOT on
-the other languages' test sets. Identical probe hyperparameters for both models; repeat with
-3-5 probe seeds and report mean +- std (linear probes have seed variance).
-READING: absolute accuracy will be LOW at the embedding layer (context-free representations) —
-that is fine; the reading is the HUB-MINUS-BASELINE DELTA per language, not the absolute number.
-Verdict: hub's zero-shot accuracy exceeds baseline's at the same depth, beyond seed noise.
+Each test below: the QUESTION it answers, HOW to run it (numbered), what a WIN looks like, and
+what to WATCH OUT for. One rule shared by T3/T6/T7: always include the frequency-matched RANDOM
+control, or you measure "likes common / same-language words" instead of translation.
 
-**T2. Language-decodability probe (hub-internal diagnostic; NO baseline counterpart).**
-IDEA: turn Probe 1's partition finding into one sensitive, trackable number: how well can a
-classifier guess a token's language from WHICH anchors it uses? (The baseline has no anchors, so
-this test has no baseline comparison — it diagnoses the hub's internal organization only.)
-IMPLEMENTATION: from the eval set, sample an equal number of tokens per language; input = the
-token's full N-dim anchor weight vector w (pre-top-k); train logistic regression to predict the
-language; report accuracy vs 6-way chance (16.7%). Track across checkpoints.
-CAVEAT: languages differ in token-frequency profiles, so some decodability can come from
-frequency-correlated anchors rather than language-identity anchors; and shared tokens (loanwords
-appearing in several language streams) have IDENTICAL w but different labels, creating an
-irreducible error floor — do not over-read the absolute number. And per the balance point, the target is NOT zero: some language content is
-legitimate. READING: it is a TREND dial — decodability falling while Test B rises = sharing
-displacing partition (intended); decodability pinned ~100% with flat Test B = pure language-ID
-anchors (the known failure mode).
+---
 
-**T3. Mixture-interchange test (embedding-layer variants only: V2-V4, V6, V6f) — CAUSAL.**
-IDEA: Test B shows translation pairs' representations are CLOSE; this shows the model actually
-TREATS them as interchangeable — causal evidence the anchors carry shared meaning.
-SCOPE: embedding-layer hubs only. NOT applicable to V5 — mid-layer retrieval is CONTEXTUAL, so
-mixture(w) cannot be precomputed per word, and swapping a contextual mixture across different
-contexts is ill-defined. (For V5, T1 and Test B at layer L are the instruments.)
-IMPLEMENTATION (single-token translation pairs only — multi-token pooling would blur it):
-1. Precompute mixture(w) for each word in the pair set (embedding-layer retrieval is
-   context-free, so one lookup per word).
-2. Take eval sentences in language xx containing w_x, keeping only occurrences with at least
-   ~10 tokens AFTER the occurrence. Run normally; record the mean log-prob of the SUBSEQUENT
-   tokens only (positions after the swap). CRITICAL under causal masking: tokens BEFORE the
-   swap position are computed from unaffected states and the swap position's own log-prob is
-   predicted from the preceding context — both are IDENTICAL in the two runs. Averaging over
-   them would dilute the measured damage toward zero and destroy statistical power; measure
-   only what the swap can causally influence.
-3. Re-run with w_x's MIXTURE replaced by mixture(w_e) of its English translation — keep w_x's
-   own tok_emb / residual untouched, so ONLY the anchor pathway is swapped.
-4. Control: same swap but with a FREQUENCY-MATCHED RANDOM English word's mixture.
-5. Report, over many pairs (paired stats): damage(translation-swap) vs damage(random-swap).
-READING: translation-swap hurting MUCH LESS than random-swap = anchors encode shared semantics
-causally. Both swaps hurting ~zero = the anchor pathway is not load-bearing at all (cross-check
-with the anchors-only PPL dial). For V2-V4, do the same swap inside the combine step — weaker
-(the untouched x dominates) but still directional.
+**T1 — Transfer probe.** (all variants; hub vs baseline)
+QUESTION: does a task learned in English carry to other languages? (This is the project's actual
+claim.)
+HOW:
+1. Freeze both models (hub, baseline).
+2. Represent each sentence = mean-pool the hidden states at a chosen layer. For V6/V6f use the
+   inference-mode representation (`tok_emb + mixture` / `concept + resid`).
+3. Train a LINEAR classifier on English XNLI on top of that representation (pair features
+   `[u; v; |u-v|; u*v]`; 20-50k examples is enough for a linear head; early-stop on English dev).
+4. Test it UNCHANGED (zero-shot) on the other languages. Repeat with 3-5 seeds, report mean+-std.
+5. Do this at the SAME layer depth in both models (fair comparison: the hub is just part of the
+   hub-model's computation up to that depth).
+WIN: hub's zero-shot foreign accuracy > baseline's, beyond seed noise.
+WATCH OUT: at the EMBEDDING layer, mean-pooling is bag-of-words (no word order), so XNLI is
+near-chance for BOTH models and the delta is unmeasurable. Read T1 at DEEPER layers (mid, last),
+which have order and rise above chance. (For V5 the anchor layer is already deep, so it works
+there.) Probe several layers in one forward pass — nearly free.
 
-**T4. Effective-contribution statistics (V3/V4/V5; V2 analogue) — detects ignorability DIRECTLY.**
-IDEA: if the model has declined the hub, say so mid-run instead of waiting for Test B.
-IMPLEMENTATION: over the eval set, log per token (aggregate per language): (a) mean gate value
-sigmoid(Linear_g(x)); and (b) the more decisive scalar ||gate * update|| / ||x|| — the effective
-contribution share (gates can be open while the update is tiny, so (b) is the real dial; it is
-the norm_ratio generalization). For V2: ||W_mix @ mixture|| / ||W_x @ x||.
-READING: contribution share ~0 everywhere late in training = hub declined (ignorability
-confirmed directly). Share healthy for some languages only = hub used as a language-specific
-patch, not a bridge.
+---
 
-**T5. Layer-sweep pre-test (V5; runs on EXISTING baseline checkpoints, BEFORE any training).**
-IDEA: choose V5's layer with data, not the "~layer 10" guess — and get V5's per-layer baseline
-reference numbers in the same pass.
-IMPLEMENTATION: reuse the Probe-2 machinery, but on hidden states at each layer L: for each
-single-token translation pair, mean-pool the hidden states of the word's occurrences IN CONTEXT
-over eval sentences (deeper layers are contextual, so use real occurrences, not isolated
-tokens); compute the translation-vs-frequency-matched-random similarity gap at every L. One
-forward pass per eval batch with all-layer outputs retained.
-READING: the per-layer gap profile shows WHERE cross-lingual alignment lives in the baseline;
-place V5's block at (or just before) the peak. Do not be alarmed that RAW cosines grow large at
-deeper layers — hidden states are anisotropic (everything is similar to everything) — the
-translation-vs-random GAP is the reading precisely because both sides are inflated equally. The per-layer gaps ARE the baseline reference
-numbers V5's verdict compares against — two birds, one cheap analysis.
+**T2 — Language-decodability.** (hub-internal diagnostic; no baseline)
+QUESTION: do the anchors just encode "which language is this?" (the partition failure)?
+HOW:
+1. Sample equal tokens per language from the eval set.
+2. Input = the token's full N-dim anchor-weight vector `w`.
+3. Train logistic regression to predict the token's language; report accuracy vs 6-way chance
+   (16.7%). Track across checkpoints.
+WIN (the intended direction): decodability FALLING while Test B RISES = shared structure
+replacing language partition.
+WATCH OUT: target is NOT zero — some language-specific content is legitimate (cultural,
+orthographic). And loanwords (identical token in several languages) have identical `w` but
+different labels, so there is an error floor — read the TREND, not the absolute number.
 
-Priority if time-constrained: T5 before any V5 run (free de-risking); T1 + T3 as the headline
-evidence on whatever variant is run; T2 and T4 as always-on cheap diagnostics.
+---
+
+**T3 — Mixture-interchange.** (embedding-layer variants: V2-V4, V6, V6f; hub vs its own swaps)
+QUESTION: does the model treat "dog" and "cho" as interchangeable — causal proof the anchors
+carry shared meaning?
+HOW (single-token pairs only):
+1. Precompute each word's anchor mixture (context-free at the embedding layer — one lookup).
+2. Take eval sentences containing the foreign word `w_x`, keeping only ones with >=10 tokens
+   AFTER it. Run normally; record the summed log-prob of ONLY those following tokens -> `L_clean`.
+3. Re-run with `w_x`'s mixture replaced by its English translation's mixture (leave `w_x`'s own
+   embedding/residual untouched — swap ONLY the anchor pathway); record `L_swap`.
+   Damage_translation = L_clean - L_swap.
+4. Control: same swap but with a FREQUENCY-MATCHED RANDOM English word's mixture ->
+   Damage_random.
+5. Over many pairs (paired stats): compare Damage_translation vs Damage_random.
+WIN: translation-swap hurts MUCH LESS than random-swap = the model barely notices when you
+substitute the real translation's concept = anchors encode shared meaning.
+WATCH OUT: measure ONLY the tokens AFTER the swap. Under causal masking, tokens before it and
+its own prediction are identical in both runs; including them dilutes the signal to zero. If both
+swaps hurt ~zero, the anchor pathway is not load-bearing (cross-check the anchors-only PPL dial).
+NOT for V5 (mid-layer mixtures are contextual — cannot be precomputed or swapped across contexts).
+
+---
+
+**T4 — Contribution share.** (V3/V4/V5; rough proxy for V2)
+QUESTION: is the model actually USING the hub, or ignoring it (the ignorability failure)?
+HOW: over the eval set, log per token (aggregate per language) the effective contribution share
+`||gate * update|| / ||x||` (how big the hub's contribution is vs the token). Also log mean gate
+value, but the norm ratio is the decisive dial (a gate can be open while the update is tiny).
+- V3/V4/V5: clean, because the block is residual (`x + gate*update`).
+- V2: non-residual, so use `||W_mix @ mixture|| / ||output||` as a ROUGH proxy (not identical;
+  read as a trend, since `W_x` drifts from identity over training).
+WIN / READ: share ~0 late in training = hub declined (ignorability confirmed, mid-run, without
+waiting for Test B). Share healthy for some languages only = hub used as a language patch, not a
+bridge.
+
+---
+
+**T5 — Layer-sweep (for V5, BEFORE training).** (runs on EXISTING baseline checkpoints)
+QUESTION: which layer should V5's anchors sit at?
+HOW:
+1. On a trained baseline checkpoint (the alpha-experiment baseline if you still have it;
+   otherwise any monolingual-trained no-hub baseline — no NEW training needed), for each layer L:
+   take single-token
+   translation pairs, mean-pool each word's hidden states over its IN-CONTEXT occurrences
+   (deeper layers are contextual — use real occurrences, not isolated tokens).
+2. Compute the translation-vs-frequency-matched-random similarity gap at every L. One forward
+   pass with all layer outputs retained.
+WIN / USE: the layer where the gap PEAKS is where cross-lingual structure naturally lives — put
+V5's block there instead of guessing "~layer 10". Bonus: these per-layer gaps ARE the baseline
+numbers V5's verdict must beat.
+WATCH OUT: raw cosines grow large at deep layers (hidden states are anisotropic — everything is
+similar to everything); that is why the GAP (translation minus random) is the reading, since
+both sides inflate equally.
+
+---
+
+**T6 — Translation retrieval (BLI).** (all variants; hub vs baseline)
+QUESTION: can you FIND a word's translation as its nearest neighbor? (The cleanest, cheapest
+cross-lingual number — no probe training, no data to build.)
+HOW (single-token pairs):
+1. Get each word's representation at the tested layer (inference-mode for V6/V6f).
+2. Build a candidate pool = all single-token target-language words in the pair set.
+3. For each English word, score every candidate by CSLS = `2*cos(e,x) - r(e) - r(x)`, where
+   `r(e)` = e's average cosine to its ~10 nearest TARGET-language candidates, and `r(x)` = x's
+   average cosine to its ~10 nearest SOURCE (English) words (the two densities point in OPPOSITE
+   directions — this is what corrects hubness). Use CSLS, NOT raw cosine, which inflates BLI.
+   (CSLS is from Conneau et al., "Word Translation Without Parallel Data" — arXiv 1710.04087,
+   2017 preprint / ICLR 2018, the SAME MUSE paper and dictionary this project already uses. It
+   is the field-standard BLI nearest-neighbor retrieval metric. Formula direction confirmed
+   against the published equation: for source word e and target candidate x, the penalty r(e)
+   is e's mean cosine to its TARGET-side neighbors and r(x) is x's mean cosine to its SOURCE-side
+   neighbors. Note: standard but not SOTA — later methods (unsupervised-MT BLI 2019, cross-encoder
+   rerankers) beat it by a few points; fine for a cheap diagnostic, reconsider only if BLI becomes
+   a headline number.)
+4. Record whether the true translation is rank-1 (P@1) / in the top-5 (P@5). Report per language
+   pair, hub vs baseline at the same layer.
+WIN: hub's P@1/P@5 > baseline's. (Stronger than Test B: there the translation only had to beat
+random pairs; here it must beat EVERY other word.)
+WATCH OUT: absolute P@1 is low at 0.6B, especially en-zh — read the hub-minus-baseline delta.
+
+---
+
+**T7 — Generative behavior (code-switch continuation).** (all variants; hub vs baseline)
+QUESTION: does the MODEL'S OWN OUTPUT (through the LM head) behave more cross-lingually with the
+hub? (Closest thing to a real translation-task result; similar to PREALIGN's CLKA.)
+HOW:
+1. Build minimal prompts whose correct next token is a known translation, from the word
+   dictionary — e.g. "dog in Vietnamese is ___" (target `cho`), or "cho = ___" (target `dog`).
+2. For each prompt, read `log P(correct translation token | prompt)` — one forward pass.
+3. CONTROL: same prompt, `log P(frequency-matched random target-language word)`.
+4. Metric = mean of `[log P(correct) - log P(random)]`. Compare hub vs baseline.
+WIN: hub's margin > baseline's = the hub makes the model GENERATE correct cross-lingual
+continuations more strongly.
+WATCH OUT: the random control (same prompt) is essential — it cancels the prompt's oddness and
+isolates the translation-specific effect. Dictionary is used only to BUILD prompts, never to
+train.
+(REJECTED alternative: "prepend the English sentence, measure PPL drop on its translation." The
+model never saw en-then-translation in training, so that input is out-of-distribution and a null
+would be uninterpretable; it also lacks a within-prompt control. Do not use it.)
+
+---
+
+**T8 — MEXA (all variants; hub vs baseline; standardized sentence-level alignment).**
+PRIMARY INSTRUCTION — USE THE OFFICIAL IMPLEMENTATION: https://github.com/cisnlp/MEXA
+(Apache-2.0; verified as the paper authors' code — Kargaran et al., arXiv 2410.05873, ACL
+Findings 2025). Run their `embed_extractor.py` (default `--embedding_type embd_weighted`) then
+`compute_mexa.py` (pivot `eng_Latn`) on BOTH the hub model and the matched baseline, and compare
+the scores per language pair. Follow the repo's README as the source of truth; the explanation
+below is only to help you understand what those scripts do and why — if it ever conflicts with
+the repo, the REPO wins.
+QUESTION: how well do parallel sentences align at each layer, on a robust metric that (a)
+correlates ~0.90 with real downstream multilingual performance and (b) is comparable to
+published numbers?
+WHY it is better than a plain cosine average: it does NOT use absolute cosine values (those
+suffer anisotropy/hubness — non-parallel sentences can score as high as parallel ones). Instead
+it is a binary RETRIEVAL check per sentence pair.
+HOW:
+1. Take ~100 parallel sentences per language pair (En + XX). FLORES-200 devtest is the standard
+   source; 100 is enough (the paper shows chance of a high score is ~0.0002 at n=100).
+2. Sentence embedding at layer l = TOKEN-POSITION-WEIGHTED average of that layer's hidden states:
+   `e_l = sum_t w_t * h_lt` with `w_t = t / (sum_k k)` (later tokens weighted more — corrects the
+   causal-attention bias where late tokens carry more context). This weighted-average + later
+   mean-pooling over layers is the paper's best-correlating setting.
+3. For layer l, build the n x n cosine matrix C where `c_ij` = cos(En sentence i, XX sentence j).
+   Diagonal `c_ii` = true parallel pairs.
+4. MEXA score at layer l = fraction of i where `c_ii` is STRICTLY GREATER than every off-diagonal
+   in BOTH its row and its column:
+   `mu_l = (1/n) * sum_i  1[ c_ii > max_{j != i} { c_ij , c_ji } ]`.
+   (This is P@1 sentence retrieval in both directions at once — hence robust to hubness, since
+   only the RANK of the true pair matters, not the absolute similarity.)
+5. Combine layers by MEAN pooling of `mu_l` (paper default) to get one score per language pair.
+WIN: hub's MEXA > baseline's (per language pair, same layers). Because MEXA correlates ~0.90
+with downstream tasks, a hub gain here is strong evidence of real multilingual gain, and the
+number is comparable across models/runs using the same sentences + setting.
+WATCH OUT: needs ~100 PARALLEL SENTENCES per pair (FLORES-200 devtest, first 100 lines — has
+vi/zh/ru/de/ar) — used only for EVALUATION, never training. Report per language pair. Cheap: one
+forward pass over ~100 short sentences per language, no probe training.
+DATA FORMAT for the repo scripts: one text file per language (e.g. `eng_Latn.txt`,
+`vie_Latn.txt`), line i parallel across files; FLORES-200 devtest first 100 lines. (See the
+PRIMARY INSTRUCTION above — run the official scripts, do not reimplement the binary-retrieval
+logic.)
+
+HOW THEY FIT (weakest to strongest cross-lingual claim): T4 "hub is used" -> T2 "not just
+language tags" -> Test B "translations geometrically close" -> T6 "close enough to be nearest
+neighbors" -> T3 "interchangeable = same meaning" -> T1 "a task transfers" -> T7 "the model
+itself behaves cross-lingually". T5 is a setup tool for V5, not a verdict.
+
+REPORT related vs distant pairs SEPARATELY: en-de / en-vi (Latin script, loanword-heavy) apart
+from en-zh / en-ar / en-ru (distant, other scripts). Architecture-only alignment is strong for
+related pairs, weak for distant ones — a single average hides the pattern; en-zh is the stress
+case.
+
+Priority if time-constrained: T6 + T8 (MEXA) + Test B every checkpoint (all cheap, and MEXA is
+the one that correlates with real downstream performance and is comparable to published numbers);
+T2 + T4 as always-on diagnostics; T1 + T3 + T7 on checkpoints that already look promising; T5
+once before any V5 run.
 
 Suggested run order for step 1 (do NOT run everything — this is a two-run first pass):
 1. RUN V5 and V6f as the two first-pass runs — they test the two DIFFERENT hypotheses about why
@@ -705,11 +947,13 @@ What to run:
 
 ## 4. MECHANISM refinements  [last; only after a positive result]
 Optimize a working mechanism; do NOT create cross-lingual pressure.
-- Top-k sparse selection ON THE ADDITIVE form (5-10 of 1000) — selection already reaches
+- Top-k sparse selection ON THE ADDITIVE form (5-10 of N) — selection already reaches
   effective ~20 anchors, low expected value. (NOTE: this is distinct from V2c, which CONCATS the
   top-k anchor vectors — a real architecture change, in Section 1. Here it means merely sparsening
   the additive weighted sum, a refinement.)
-- Fewer anchors (256/512) — Probe 1 showed ~45% of 1000 wasted; efficiency, not a fix.
+- Fewer anchors as a STANDALONE tweak — largely MOOT now: N=128 is already the default for all
+  variants (shared elements). Sweeping N further (64 vs 128 vs 256) is a dial there, not a
+  separate refinement.
 - Fancier similarity than cosine — cosine is not the bottleneck.
 
 ---
