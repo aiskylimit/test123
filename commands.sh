@@ -1,2 +1,2 @@
-#2 +a
-#collect-and-pull
+#2 -f-/opt/dlami/nvme/probe_results/
+#pull-all-results
