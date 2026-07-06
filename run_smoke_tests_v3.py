@@ -288,10 +288,15 @@ def main():
                 rows = list(csv.DictReader(f))
             if rows:
                 last = rows[-1]
+                def _safe_float(v, default=0.0):
+                    try:
+                        return float(v)
+                    except (ValueError, TypeError):
+                        return default
                 final_line = (f"step={last.get('step', '?')} "
-                              f"scale={float(last.get('embhub/logit_scale', 0)):.2f} "
-                              f"entropy={float(last.get('embhub/entropy', 0)):.4f} "
-                              f"norm_ratio={float(last.get('embhub/norm_ratio', 0)):.4f}")
+                              f"scale={_safe_float(last.get('embhub/logit_scale')):.2f} "
+                              f"entropy={_safe_float(last.get('embhub/entropy')):.4f} "
+                              f"norm_ratio={_safe_float(last.get('embhub/norm_ratio')):.4f}")
         logger.info(f"\n  {job['arm']} ({job['config']['hub_type']}@{job['config'].get('placement', 'emb')}) "
                      f"[{job['elapsed']:.0f}s]:")
         logger.info(f"    {final_line}" if final_line else f"    No metrics")
