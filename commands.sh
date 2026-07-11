@@ -1,3 +1,2 @@
-#1
+#2 +a
 #setup-env
-bash scripts/setup_env.sh
